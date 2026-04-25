@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The long winding road to TG8</title>
+    <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+
+<div class="container">
+    <h2 style="margin-top:0;">The long winding road to TG8</h2>
+
+    <details class="state-pane" id="infoPane" open>
+        <summary>About this tool</summary>
+        <div style="font-size: 0.85rem; line-height: 1.5; color: #444; padding: 4px 2px;">
+            <p style="margin: 0 0 8px;">This tool estimates how long it takes to reach <b>TG 8</b> starting from your current state, while also bringing Barracks, Range and Stable up to their maximum tiers along the way.</p>
+            <p style="margin: 0 0 8px;">It prioritises spending <b>TG, TTG and speed-ups during KvK prep week</b> to earn as many points as possible. Multi-day upgrades (Town Center and Embassy) are deliberately delayed so their build time can be burned down with speed-ups during prep week — each day of speed-up spent earns points. Barracks, Range and Stable are only started when enough speed-ups are banked to finish them instantly, so they never have to stop printing troops.</p>
+            <p style="margin: 0 0 8px;">The plan <b>skips Strongest Governor and other events</b> — it only models the KvK prep-week schedule.</p>
+            <p style="margin: 0 0 8px;"><b>TG income from events is not counted.</b> Only the Daily Income field drives TG income. Any extra income will have to be added to the balance manually.</p>
+            <p style="margin: 0; color: #8e44ad;"><b>Disclaimer:</b> the further into the future the plan projects, the less accurate it becomes. Re-run the calculation periodically with your current balances and building state for the best estimate.</p>
+        </div>
+    </details>
+
+    <details class="state-pane" id="statePane" open>
+        <summary>Current State of Affairs</summary>
+        <table class="state-table">
+            <thead>
+                <tr><th>Building</th><th>Main</th><th>Sub</th><th>Currently Being Upgraded</th><th>Days Left</th></tr>
+            </thead>
+            <tbody id="stateBody"></tbody>
+        </table>
+    </details>
+
+    <details class="state-pane" id="buildTimesPane">
+        <summary>
+            Build Times
+            <span id="buildTimesSummary" class="pane-summary"></span>
+        </summary>
+        <table class="state-table">
+            <thead>
+                <tr><th>Building</th><th>Days per upgrade</th></tr>
+            </thead>
+            <tbody id="buildTimesBody"></tbody>
+        </table>
+    </details>
+
+    <form id="calcForm">
+        <div class="field-block">
+            <div class="field-heading">Balance</div>
+            <div class="input-group">
+                <div class="input-item" style="width:125px">
+                    <label for="currentTG"><img class="icon" src="TG.webp" alt=""> TG <span class="hint" title="Truegold — primary currency earned from daily income and spent on upgrades and refines.">?</span></label>
+                    <input type="number" id="currentTG" class="persist">
+                </div>
+                <div class="input-item" style="width:125px">
+                    <label for="currentTTG"><img class="icon" src="TTG.webp" alt=""> TTG <span class="hint" title="Tempered Truegold — secondary resource refined from Truegold. Required alongside Truegold to start any upgrade.">?</span></label>
+                    <input type="number" id="currentTTG" step="1" class="persist">
+                </div>
+                <div class="input-item" style="width:auto">
+                    <label>Speed-ups <span class="hint" title="Speed-ups currency. 1 speed-up removes 1 day of build time from an active upgrade. Can only be spent on approved dates.">?</span></label>
+                    <span class="dh-pair">
+                        <input type="number" id="currentSpeedUpsD" min="0" step="1" value="0" class="persist"> <span class="dh-unit" data-short="d">days</span>
+                        <input type="number" id="currentSpeedUpsH" min="0" max="23" step="1" value="0" class="persist"> <span class="dh-unit" data-short="h">hours</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <div class="field-block">
+            <div class="field-heading">Income</div>
+            <div class="input-group">
+                <div class="input-item" style="width:125px">
+                    <label for="dailyIncome"><img class="icon" src="TG.webp" alt=""> TG / day <span class="hint" title="Truegold earned per day, added to the wallet at the start of every simulated day.">?</span></label>
+                    <input type="number" id="dailyIncome" class="persist">
+                </div>
+                <div class="input-item" style="width:auto">
+                    <label>Speed-ups / day <span class="hint" title="Speed-ups earned per day, added to the balance at the start of every simulated day.">?</span></label>
+                    <span class="dh-pair">
+                        <input type="number" id="speedUpIncomeD" min="0" step="1" value="0" class="persist"> <span class="dh-unit" data-short="d">days</span>
+                        <input type="number" id="speedUpIncomeH" min="0" max="23" step="1" value="0" class="persist"> <span class="dh-unit" data-short="h">hours</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <div class="actions">
+            <button id="resetBtn" type="button">Reset Defaults</button>
+        </div>
+    </form>
+
+    <div id="summaryBar" class="summary-bar" style="display:none;">
+        <span id="finishDate"></span>
+        <span id="totalSpend"></span>
+        <span id="errorMsg" style="color:#a00; display:none;"></span>
+    </div>
+
+    <div class="plan-wrapper">
+        <table id="planTable">
+            <thead>
+                <tr>
+                    <th class="mobile-short" data-short="Date"><span class="full-label">Date</span></th>
+                    <th>Weekday</th>
+                    <th class="mobile-short" data-short="SR"><span class="full-label">Super Refines</span></th>
+                    <th class="mobile-short" data-short="TG"><span class="full-label"><img class="icon" src="TG.webp" alt=""> TG Balance</span></th>
+                    <th class="mobile-short" data-short="TTG"><span class="full-label"><img class="icon" src="TTG.webp" alt=""> TTG Balance</span></th>
+                    <th class="mobile-short" data-short="SU"><span class="full-label">Speed-ups (days)</span></th>
+                    <th class="mobile-short" data-short="Activity"><span class="full-label">Activity / Logic</span></th>
+                </tr>
+            </thead>
+            <tbody id="planBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script type="text/javascript" src="./buildings.js"></script>
+<script type="text/javascript" src="./engine.js"></script>
+<script type="text/javascript" src="./calculation.js"></script>
+<script>
+    // Build the state pane.
+    (() => {
+        const tbody = document.getElementById('stateBody');
+        const mains = [5, 6, 7, 8];
+        const subs = [0, 1, 2, 3, 4];
+        BUILDINGS_ORDER.forEach(name => {
+            const key = name.replace(/\s+/g, '');
+            const mainOpts = mains.map(m => `<option value="${m}">${m}</option>`).join('');
+            const subOpts = subs.map(s => `<option value="${s}">${s}</option>`).join('');
+            tbody.insertAdjacentHTML('beforeend',
+                `<tr>
+                    <td><b>${name}</b></td>
+                    <td><select id="st-${key}-main" class="persist">${mainOpts}</select></td>
+                    <td><select id="st-${key}-sub" class="persist">${subOpts}</select></td>
+                    <td><input type="checkbox" id="st-${key}-upg" class="persist"></td>
+                    <td><span id="st-${key}-days-wrap" class="dh-pair" style="visibility:hidden">
+                        <input type="number" id="st-${key}-days-d" min="0" step="1" value="0" class="persist"> <span class="dh-unit" data-short="d">days</span>
+                        <input type="number" id="st-${key}-days-h" min="0" max="23" step="1" value="0" class="persist"> <span class="dh-unit" data-short="h">hours</span>
+                    </span></td>
+                </tr>`);
+        });
+    })();
+
+    // Build the build-times table.
+    (() => {
+        const tbody = document.getElementById('buildTimesBody');
+        BUILDINGS_ORDER.forEach(name => {
+            const key = name.replace(/\s+/g, '');
+            tbody.insertAdjacentHTML('beforeend',
+                `<tr>
+                    <td><b>${name}</b></td>
+                    <td class="dh-pair">
+                        <input type="number" id="bt-${key}-d" min="0" step="1" value="${DEFAULT_BUILD_TIMES[name]}" class="persist"> <span class="dh-unit" data-short="d">days</span>
+                        <input type="number" id="bt-${key}-h" min="0" max="23" step="1" value="0" class="persist"> <span class="dh-unit" data-short="h">hours</span>
+                    </td>
+                </tr>`);
+        });
+    })();
+</script>
+
+</body>
+</html>
