@@ -92,6 +92,9 @@ function solveUpgradePath(currentTG, currentTTG, dailyIncome, upgrades, startDat
     };
     const scale = (ttg) => ttg * TTG_SCALE;
 
+    // The user's entered balances already reflect today's income, so skip adding
+    // income on the first simulated day to avoid double-counting.
+    let isFirstDay = true;
     let truncated = false;
     while (queue.length > 0 || activeBuilders.length > 0) {
         advanceDay();
@@ -112,8 +115,10 @@ function solveUpgradePath(currentTG, currentTTG, dailyIncome, upgrades, startDat
 
     function advanceDay() {
         if (currentDate.getUTCDay() === MONDAY) weeklyRefines = 0;
-        walletTG += dailyIncome;
-        walletSpeedUps += suIncome;
+        if (!isFirstDay) {
+            walletTG += dailyIncome;
+            walletSpeedUps += suIncome;
+        }
 
         const dayState = { t1Used: false, t2Used: false, convs: 0, suSpent: 0 };
         const started = [], completed = [], logicNotes = [];
@@ -124,6 +129,9 @@ function solveUpgradePath(currentTG, currentTTG, dailyIncome, upgrades, startDat
         const needs = computeNeeds();
         doMaintenanceRefines(needs, dayState, logicNotes);
         tryStartUpgrades(started, completed, logicNotes, dayState);
+
+        // Clear after all day-0 processing so tryRefine can see isFirstDay above.
+        isFirstDay = false;
 
         recordHistoryRow(dayState.convs, started, completed, logicNotes, dayState.suSpent);
         currentDate.setUTCDate(currentDate.getUTCDate() + 1);
@@ -173,6 +181,8 @@ function solveUpgradePath(currentTG, currentTTG, dailyIncome, upgrades, startDat
     }
 
     function tryRefine(maxTier, dayState) {
+        // Day 0: today's super refines are presumed already done — skip all refining.
+        if (isFirstDay) return false;
         const t = tierFor(weeklyRefines);
         if (!t || t.tier > maxTier) return false;
         const cost = getRefineCost(weeklyRefines, dayState.t1Used, dayState.t2Used);
@@ -250,23 +260,12 @@ function solveUpgradePath(currentTG, currentTTG, dailyIncome, upgrades, startDat
     function doMaintenanceRefines(needs, dayState, logicNotes) {
         if (queue.length === 0 || walletTTG >= needs.remainingTTG) return;
 
-        tryRefine(1, dayState);
-        if (weeklyRefines >= 20) tryRefine(2, dayState);
-
-        const blocker = queue.find(it =>
-            isEligible(it) && canStart(it) && walletTG >= it.TG && walletTTG < scale(it.TTG));
-        if (!blocker) return;
-
-        while (walletTTG < scale(blocker.TTG) && weeklyRefines < 100) {
-            const t = tierFor(weeklyRefines);
-            if (!t) break;
-            const cost = getRefineCost(weeklyRefines, dayState.t1Used, dayState.t2Used);
-            if (walletTG < cost) break;
-            if (t.tier >= 3 && walletTG < cost + blocker.TG) {
-                logicNotes.push("Saving TG for build start");
-                break;
-            }
-            if (!tryRefine(5, dayState)) break;
+        // Strategy: 14 refines on Monday, 1 on every other day (20/week total).
+        // tryRefine(1, …) naturally caps at 20 weekly T1 refines — tierFor(20)
+        // returns T2 (tier 2 > maxTier 1), causing tryRefine to return false.
+        const dailyTarget = currentDate.getUTCDay() === MONDAY ? 14 : 1;
+        for (let i = 0; i < dailyTarget; i++) {
+            if (!tryRefine(1, dayState)) break;
         }
     }
 
@@ -293,16 +292,13 @@ function solveUpgradePath(currentTG, currentTTG, dailyIncome, upgrades, startDat
         }
         const target = eligible.find(it => walletTG >= it.TG && walletTTG < scale(it.TTG));
         if (!target) return null;
-        while (walletTTG < scale(target.TTG) && weeklyRefines < 100) {
-            const t = tierFor(weeklyRefines);
-            if (!t) break;
-            const cost = getRefineCost(weeklyRefines, dayState.t1Used, dayState.t2Used);
-            if (walletTG < cost) break;
-            if (t.tier >= 3 && walletTG < cost + target.TG) {
+        while (walletTTG < scale(target.TTG)) {
+            const nextCost = getRefineCost(weeklyRefines, dayState.t1Used, dayState.t2Used);
+            if (walletTG < nextCost + target.TG) {
                 logicNotes.push("Saving TG for build start");
                 break;
             }
-            if (!tryRefine(5, dayState)) break;
+            if (!tryRefine(1, dayState)) break;
         }
         return (walletTG >= target.TG && walletTTG >= scale(target.TTG)) ? target : null;
     }

@@ -405,9 +405,9 @@ test('speed-ups: balance accumulates when there is nothing to spend on', () => {
     const r = solveUpgradePath(0, 0, 0, q, '2026-04-24', { tcMainTier:5, embassyMainTier:5, preActiveBuilders:[] }, 0, 1);
     // Day 0 is 2026-04-24 (approved) but there are no active builders and nothing can start with
     // walletTG=0. Speed-ups should NOT be consumed — greedy spend only applies when there is
-    // something to spend them on.
-    assert(r.history[0].speedUps === 1, `day 0 speedUps=${r.history[0].speedUps}`);
-    assert(r.history[5].speedUps === 6, `day 5 speedUps=${r.history[5].speedUps}`);
+    // something to spend them on. Income is not added on day 0 (presumed already received).
+    assert(r.history[0].speedUps === 0, `day 0 speedUps=${r.history[0].speedUps}`);
+    assert(r.history[5].speedUps === 5, `day 5 speedUps=${r.history[5].speedUps}`);
 });
 
 test('speed-ups: ignored on non-approved days (even with active builder)', () => {
@@ -417,8 +417,8 @@ test('speed-ups: ignored on non-approved days (even with active builder)', () =>
     // Start on 2026-04-25 (Saturday, not approved); next approved is 2026-05-18
     const r = solveUpgradePath(0, 0, 0, q, '2026-04-25', { tcMainTier:5, embassyMainTier:5, preActiveBuilders: preActive }, 10, 1);
     // On a non-approved day, speed-ups should not be consumed — balance grows purely via income.
-    // Day 0 (Sat): start with 10, +1 income, no spend → 11
-    assert(r.history[0].speedUps === 11, `day 0 speedUps=${r.history[0].speedUps} (expected 11, no spend on non-approved)`);
+    // Day 0 (Sat): start with 10, income skipped (already received), no spend → 10
+    assert(r.history[0].speedUps === 10, `day 0 speedUps=${r.history[0].speedUps} (expected 10, no income on day 0, no spend on non-approved)`);
 });
 
 test('speed-ups: consumed on approved day to reduce active builder remaining days', () => {
