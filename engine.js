@@ -208,6 +208,33 @@ function solveUpgradePath(currentTG, currentTTG, dailyIncome, upgrades, startDat
         const { main, sub } = parseTier(item.tier);
         return main < tcMainTier || (main === tcMainTier && sub === 0);
     }
+
+    // Returns true if a major-tier milestone (sub===4: last step of a tier;
+    // sub===0: first step of the next tier) for any RESTRICTED building is
+    // reachable on a remaining approved day in the current approved cycle.
+    // Used to defer Embassy/TC so troop buildings can complete their tier first.
+    function canFinishOrStartMajorRestrictedTierThisWeek() {
+        if (suIncome <= 0) return false;
+        const bfp = firstPendingPerBuilding();
+        const hasMajorTarget = Object.values(bfp).some(item => {
+            if (!RESTRICTED.includes(item.building)) return false;
+            const { sub } = parseTierStr(item.tier);
+            return sub === 0 || sub === 4;
+        });
+        if (!hasMajorTarget) return false;
+        // Walk forward up to 6 days; stop at the next Monday (start of new cycle).
+        let projectedSU = walletSpeedUps;
+        for (let d = 1; d <= 6; d++) {
+            const next = new Date(currentDate);
+            next.setUTCDate(next.getUTCDate() + d);
+            if (next.getUTCDay() === MONDAY) break;
+            projectedSU += suIncome;
+            // Use a small epsilon to absorb floating-point drift (e.g. 0.9999…994 ≈ 1).
+            if (isApprovedDate(next.toISOString().split('T')[0]) && projectedSU >= 1 - 1e-9) return true;
+        }
+        return false;
+    }
+
     function isEligible(item) {
         if (activeBuilders.some(a => a.building === item.building)) return false;
         if (!isApprovedToday(item)) return false;
@@ -230,6 +257,9 @@ function solveUpgradePath(currentTG, currentTTG, dailyIncome, upgrades, startDat
             }
             if ((item.building === BUILDING.TC || item.building === BUILDING.EMBASSY) && suIncome > 0) {
                 if (!isApprovedDate(currentDate.toISOString().split('T')[0])) return false;
+                // Defer if a RESTRICTED building can reach a major-tier milestone
+                // (finish sub===4 or open sub===0) on a remaining approved day this week.
+                if (canFinishOrStartMajorRestrictedTierThisWeek()) return false;
             }
         }
 
