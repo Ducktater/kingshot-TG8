@@ -252,8 +252,17 @@ function solveUpgradePath(currentTG, currentTTG, dailyIncome, upgrades, startDat
         //   insta-finish budget — partial progress is fine for them.
         if (item.DaysToBuild > 0) {
             if (RESTRICTED.includes(item.building) && suIncome > 0) {
-                // Speed-ups consume in whole units, so a 1.5-day build needs 2 SU.
-                if (Math.floor(walletSpeedUps) < Math.ceil(item.DaysToBuild)) return false;
+                // Sub-1-day builds (e.g. 22h Barracks) complete in one natural tick —
+                // no SU required; just start on an approved day and let it finish overnight.
+                // For longer builds, enough SU to insta-finish on the same approved day is
+                // required. Use epsilon to absorb floating-point drift in walletSpeedUps.
+                if (item.DaysToBuild >= 1 && walletSpeedUps + 1e-9 < Math.ceil(item.DaysToBuild)) return false;
+                // Respect sequence order within RESTRICTED buildings (Barracks → Range → Stable).
+                // If an earlier-sequence building is active overnight (not yet insta-finished),
+                // block later-sequence ones — the slot is implicitly reserved for the next
+                // tier of the earlier building once it completes.
+                const myIdx = RESTRICTED.indexOf(item.building);
+                if (myIdx > 0 && activeBuilders.some(a => RESTRICTED.includes(a.building) && RESTRICTED.indexOf(a.building) < myIdx)) return false;
             }
             if ((item.building === BUILDING.TC || item.building === BUILDING.EMBASSY) && suIncome > 0) {
                 if (!isApprovedDate(currentDate.toISOString().split('T')[0])) return false;
@@ -317,20 +326,33 @@ function solveUpgradePath(currentTG, currentTTG, dailyIncome, upgrades, startDat
             .filter(it => bfp[it.building] === it && isEligible(it) && canStart(it))
             .sort((a, b) => buildingPriority(a) - buildingPriority(b));
         if (eligible.length === 0) return null;
-        for (const it of eligible) {
-            if (walletTG >= it.TG && walletTTG >= scale(it.TTG)) return it;
-        }
-        const target = eligible.find(it => walletTG >= it.TG && walletTTG < scale(it.TTG));
-        if (!target) return null;
-        while (walletTTG < scale(target.TTG)) {
-            const nextCost = getRefineCost(weeklyRefines, dayState.t1Used, dayState.t2Used);
-            if (walletTG < nextCost + target.TG) {
-                logicNotes.push("Saving TG for build start");
-                break;
+        // Walk items in priority/queue order. For each, attempt burst-refining for TTG
+        // before giving up and moving on. This prevents a later item (e.g. Range 6-2)
+        // from being chosen ahead of an earlier item (e.g. Barracks 7-0) just because
+        // Range happens to need less TTG right now.
+        // If a same-priority item fails even after refining, block all other
+        // same-priority items — they must wait too. Higher-priority-number items
+        // (Embassy/TC, which have lower actual priority) are still allowed through.
+        let blockedPriority = null;
+        for (const target of eligible) {
+            const pri = buildingPriority(target);
+            if (pri === blockedPriority) continue;      // same tier as a failed item
+            if (walletTG < target.TG) continue;         // genuinely can't afford TG
+            if (walletTTG >= scale(target.TTG)) return target; // immediately affordable
+            // Need more TTG — try burst-refining.
+            while (walletTTG < scale(target.TTG)) {
+                const nextCost = getRefineCost(weeklyRefines, dayState.t1Used, dayState.t2Used);
+                if (walletTG < nextCost + target.TG) {
+                    logicNotes.push("Saving TG for build start");
+                    break;
+                }
+                if (!tryRefine(1, dayState)) break;
             }
-            if (!tryRefine(1, dayState)) break;
+            if (walletTG >= target.TG && walletTTG >= scale(target.TTG)) return target;
+            // Still can't afford after refining — block items at the same priority.
+            blockedPriority = pri;
         }
-        return (walletTG >= target.TG && walletTTG >= scale(target.TTG)) ? target : null;
+        return null;
     }
 
     function tryStartUpgrades(started, completed, logicNotes, dayState) {
